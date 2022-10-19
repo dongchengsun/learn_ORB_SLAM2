@@ -1,0 +1,46 @@
+{
+    //todo-tree settings
+    "todo-tree.general.tags": [
+        "FIXME",
+        "TODO",
+        "?",
+        "!",
+        "Step"
+    ],
+    "todo-tree.highlights.defaultHighlight": {
+        "foreground": "red",
+        "background": "yellow",
+        "icon": "alert",
+        "rulerColour": "yellow",
+        "type": "text",
+        "iconColour": "green"
+    },
+    "todo-tree.highlights.customHighlight": {
+        "?": {
+            "foreground": "#036122",
+            "icon": "question",
+            "iconColour": "yellow",
+            "type": "text-and-comment"
+        },
+        "!": {
+            "foreground": "red",
+            "icon": "issue-opened",
+            "iconColour": "red",
+            "type": "text-and-comment"
+        },
+        "Step": {
+            "foreground": "#006dfc",
+            "background": "#e2ecfa",
+            "icon": "question",
+            "iconColour": "green",
+            "type": "text-and-comment",
+            "hideFromTree": true
+        }
+    },
+    "todo-tree.tree.showCountsInTree": true,
+    "todo-tree.filtering.excludeGlobs": [
+        "**/*.txt",
+        "**/*.md"
+    ],
+    "cmake.configureOnOpen": false
+}

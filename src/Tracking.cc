@@ -43,19 +43,43 @@ using namespace std;
 namespace ORB_SLAM2
 {
 
-Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
-    mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(false), mbVO(false), mpORBVocabulary(pVoc),
-    mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
-    mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
+//构造函数
+Tracking::Tracking(
+    System *pSys,                   //系统实例
+    ORBVocabulary* pVoc,            //BOW字典
+    FrameDrawer *pFrameDrawer,      //帧绘制器
+    MapDrawer *pMapDrawer,          //地图点绘制器
+    Map *pMap,                      //地图句柄
+    KeyFrameDatabase* pKFDB,        //关键帧产生的词袋数据库
+    const string &strSettingPath,   //配置文件路径 
+    const int sensor):              //传感器类型
+        mState(NO_IMAGES_YET),                          //当前系统还没有准备好
+        mSensor(sensor),
+        mbOnlyTracking(false),                          //处于SLAM模式
+        mbVO(false),                                    //当处于纯跟踪模式的时候，这个变量表示了当前跟踪状态的好坏
+        mpORBVocabulary(pVoc),
+        mpKeyFrameDB(pKFDB),
+        mpInitializer(static_cast<Initializer*>(NULL)), //暂时给地图初始化器设置为控指针
+        mpSystem(pSys),
+        mpViewer(NULL),                                 //注意可视化的产看其是可选的，因为ORB-SLAM2最后是被编译成为一个库，所以对方人拿过来用的时候
+        mpFrameDrawer(pFrameDrawer),
+        mpMapDrawer(pMapDrawer),
+        mpMap(pMap),
+        mnLastRelocFrameId(0)                           //恢复为0，没有进行这个过程的时候的默认值
 {
     // Load camera parameters from settings file
 
+    // Step 1 从配置文件中加载相机参数
     cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
     float fx = fSettings["Camera.fx"];
     float fy = fSettings["Camera.fy"];
     float cx = fSettings["Camera.cx"];
     float cy = fSettings["Camera.cy"];
 
+    //      |fx 0  cx|
+    // K =  |0  fy cy|
+    //      |0  0  1 |
+    //构造相机内参矩阵
     cv::Mat K = cv::Mat::eye(3,3,CV_32F);
     K.at<float>(0,0) = fx;
     K.at<float>(1,1) = fy;
@@ -63,12 +87,15 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     K.at<float>(1,2) = cy;
     K.copyTo(mK);
 
+    //图像矫正系数
+    // [k1 k2 p1 p2 k3]
     cv::Mat DistCoef(4,1,CV_32F);
     DistCoef.at<float>(0) = fSettings["Camera.k1"];
     DistCoef.at<float>(1) = fSettings["Camera.k2"];
     DistCoef.at<float>(2) = fSettings["Camera.p1"];
     DistCoef.at<float>(3) = fSettings["Camera.p2"];
     const float k3 = fSettings["Camera.k3"];
+    //有些相机的畸变系数中会没有k3项
     if(k3!=0)
     {
         DistCoef.resize(5);
@@ -76,6 +103,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     }
     DistCoef.copyTo(mDistCoef);
 
+    //双目摄像头baseline * fx 50
     mbf = fSettings["Camera.bf"];
 
     float fps = fSettings["Camera.fps"];
@@ -86,6 +114,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mMinFrames = 0;
     mMaxFrames = fps;
 
+    //相机参数打印输出
     cout << endl << "Camera Parameters: " << endl;
     cout << "- fx: " << fx << endl;
     cout << "- fy: " << fy << endl;
@@ -99,7 +128,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     cout << "- p2: " << DistCoef.at<float>(3) << endl;
     cout << "- fps: " << fps << endl;
 
-
+    //1：RGB 0：BGR
     int nRGB = fSettings["Camera.RGB"];
     mbRGB = nRGB;
 
@@ -110,17 +139,31 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 
     // Load ORB parameters
 
+    // Step 2 加载ORB特征点有关的参数，并建立特征点提取器
+    //每一帧提取的特征点数 1000
     int nFeatures = fSettings["ORBextractor.nFeatures"];
+    //图像建立金字塔时的变化尺度 1.2
     float fScaleFactor = fSettings["ORBextractor.scaleFactor"];
+    //尺度金字塔的层数 8
     int nLevels = fSettings["ORBextractor.nLevels"];
+    //提取fast特征点的默认阈值 20
     int fIniThFAST = fSettings["ORBextractor.iniThFAST"];
+    //如果默认阈值提取不出足够fast特征点，则使用最小阈值 8
     int fMinThFAST = fSettings["ORBextractor.minThFAST"];
 
-    mpORBextractorLeft = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
+    //tracking过程都会用到mpORBextractorLeft作为特征点提取器
+    mpORBextractorLeft = new ORBextractor(
+        nFeatures,      //参数的含义见上面的注释
+        fScaleFactor,
+        nLevels,
+        fIniThFAST,
+        fMinThFAST);
 
+    //如果是双目，tracking过程中还会用到mpORBextractorRight作为右目标特征点提取器
     if(sensor==System::STEREO)
         mpORBextractorRight = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
+    //在单目初始化的时候，会用mpIniORBextractor来作为特征点提取器
     if(sensor==System::MONOCULAR)
         mpIniORBextractor = new ORBextractor(2*nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
@@ -133,12 +176,15 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 
     if(sensor==System::STEREO || sensor==System::RGBD)
     {
+        //判断一个3D点远近的阈值 mbf * 35 / fx
+        //ThDepth其实就是表示基线长度的多少倍
         mThDepth = mbf*(float)fSettings["ThDepth"]/fx;
         cout << endl << "Depth Threshold (Close/Far Points): " << mThDepth << endl;
     }
 
     if(sensor==System::RGBD)
     {
+        //深度相机disparity转化为depth时的因子
         mDepthMapFactor = fSettings["DepthMapFactor"];
         if(fabs(mDepthMapFactor)<1e-5)
             mDepthMapFactor=1;
@@ -234,11 +280,17 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const d
     return mCurrentFrame.mTcw.clone();
 }
 
-
-cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
+//输入左目RGB或RGBA图像
+// 1. 将图像转为mImGray并初始化mCurrentFrame
+// 2. 进行tracking过程
+//输出世界坐标系到该帧相机坐标系的变换矩阵
+cv::Mat Tracking::GrabImageMonocular(
+    const cv::Mat &im,          //单目图像
+    const double &timestamp)    //时间戳
 {
     mImGray = im;
 
+    // Step 1： 将RGB或RGBA图像转为灰度图像
     if(mImGray.channels()==3)
     {
         if(mbRGB)
@@ -254,13 +306,31 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
             cvtColor(mImGray,mImGray,CV_BGRA2GRAY);
     }
 
-    if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
-        mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
+    // Step 2： 构造Frame
+    if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)    //没有成功初始化的前一个状态就是NO_IMAGES_YET
+        mCurrentFrame = Frame(
+            mImGray,
+            timestamp,
+            mpIniORBextractor,  // NOTICE 这个使用的是初始化的时候的ORB特征点提取器
+            mpORBVocabulary,
+            mK,
+            mDistCoef,
+            mbf,
+            mThDepth);
     else
-        mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
+        mCurrentFrame = Frame(
+            mImGray,
+            timestamp,
+            mpORBextractorLeft, // NOTICE 当程序正常运行的时候使用的是正常的ORB特征点提取器
+            mpORBVocabulary,
+            mK,
+            mDistCoef,
+            mbf,
+            mThDepth);
 
+    // Step 3： 跟踪
     Track();
-
+    //返回当前帧的位姿
     return mCurrentFrame.mTcw.clone();
 }
 

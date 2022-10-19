@@ -164,6 +164,7 @@ public:
     cv::Mat mTcw;
 
     // Current and Next Frame id.
+    //类的静态成员变量，这些变量则是在整个系统开始执行的时候被初始化的（它在全局区被初始化）
     static long unsigned int nNextId;
     long unsigned int mnId;
 

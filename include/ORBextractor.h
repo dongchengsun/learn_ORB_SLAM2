@@ -56,6 +56,14 @@ public:
     // Compute the ORB features and descriptors on an image.
     // ORB are dispersed on the image using an octree.
     // Mask is ignored in the current implementation.
+    /**
+     * @brief 使用八叉树的方法将提取到的ORB特征点尽可能均匀地分布在整个图像中
+     * @details 这里是重载了这个ORBextractor类的括号运算符；函数中实际上并没有用到MASK这个参数。
+     * @param[in] image         要操作的图像
+     * @param[in] mask          图像掩膜，辅助进行图片处理
+     * @param[out] keypoints    保存提取出来的特征点的向量
+     * @param[out] descriptors  输出用的保存特征点描述子的cv::mat 
+     */
     void operator()( cv::InputArray image, cv::InputArray mask,
       std::vector<cv::KeyPoint>& keypoints,
       cv::OutputArray descriptors);
